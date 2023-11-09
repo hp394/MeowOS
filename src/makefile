@@ -9,6 +9,7 @@ master.img: boot.bin
 clear: 
 	rm -rf *.bin
 	rm -rf *.img
+	rm -rf *.img.lock
 
 .PHONY: bochs
 bochs: master.img
