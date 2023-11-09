@@ -1,0 +1,4 @@
+*.bin
+*.ini
+*.img
+*.img.lock
