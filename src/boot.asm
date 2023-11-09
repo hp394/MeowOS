@@ -15,12 +15,16 @@ mov sp, 0x7c00
 mov si, booting
 call print
 
-
+xchg bx, bx
 mov edi, 0x1000; read target memory
-mov ecx, 0; start sector
-mov bl, 1; sector number
+mov ecx, 2; start sector
+mov bl, 4; sector number
 
 call read_disk
+
+cmp word [0x1000], 0x55aa
+jnz error
+jmp 0:0x1002
 ;block
 jmp $
 
@@ -96,17 +100,24 @@ read_disk:
 
 print: 
     mov ah, 0x0e
-.next
+.next:
     mov al, [si]
     cmp al, 0
     jz .done
     int 0x10
     inc si
     jmp .next
-.done
+.done:
     ret
 booting:
     db "Booting MeowOS...", 10, 13, 0
+
+error:
+    mov si, .msg
+    call print
+    hlt; let cpu stop
+    jmp $
+    .msg db "Booting Error!", 10, 13, 0
 ; fill the rest of the space to 0
 times 510 - ($ - $$) db 0
 
