@@ -6,7 +6,6 @@ dw 0x55aa; magic number to check error
 mov si, loading
 call print
 
-xchg bx,bx
 detect_memory:
     xor ebx, ebx; set ebx to 0
 
@@ -45,30 +44,29 @@ detect_memory:
     mov edx, [ards_buffer + si + 16]
     add si, 20
     loop .show
-; ;block
-    jmp $
+
     ; xchg bx, bx
 
-    ; jmp prepare_protected_mode
+    jmp prepare_protected_mode
 
 
-; prepare_protected_mode:
-;     cli; turn off interrupt
+prepare_protected_mode:
+    cli; turn off interrupt
 
-;     ;turn on A20
-;     in al, 0x92
-;     or al, 0b10
-;     out 0x92, al
+    ;turn on A20
+    in al, 0x92
+    or al, 0b10
+    out 0x92, al
 
-;     lgdt [gdt_ptr]; load gdt
+    lgdt [gdt_ptr]; load gdt
 
-;     ; launch protected mode
-;     mov eax, cr0
-;     or eax, 1
-;     mov cr0, eax
+    ; launch protected mode
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax
 
-;     ;jump to refresh cache to launch protect mode
-;     jmp dword code_selector:protect_mode
+    ;jump to refresh cache to launch protect mode
+    jmp dword code_selector:protect_mode
     
 print: 
     mov ah, 0x0e
@@ -94,49 +92,125 @@ error:
     jmp $
     .msg db "Loading Error!", 10, 13, 0
 
-; [bits 32]
-; protect_mode:
-;  mov ax, data_selector
-;  mov ds, ax
-;  mov es, ax
-;  mov fs, ax
-;  mov gs, ax
-;  mov ss, ax; initialize segment register
+[bits 32]
+protect_mode:
+ mov ax, data_selector
+ mov ds, ax
+ mov es, ax
+ mov fs, ax
+ mov gs, ax
+ mov ss, ax; initialize segment register
 
-;  mov esp, 0x10000; change the top of stack
+ mov esp, 0x10000; change the top of stack
 
-;  mov byte [0xb8000], 'P'
-;  mov byte [0x200000], 'P'
+ mov edi, 0x10000; read target memory
+ mov ecx, 10; start sector
+ mov bl, 200; sector number
 
-; jmp $
+ call read_disk
 
-; code_selector equ (1 << 3)
-; data_selector equ (2 << 3)
-; memory_base equ 0; memory start position/base address
-; memory_limit equ ((1024 * 1024 * 1024 * 4) / (1024 * 4)) - 1; memory limit (4g / 4k - 1)
+ xchg bx, bx
 
-; gdt_ptr:
-;     dw (gdt_end - gdt_base) - 1
-;     dd gdt_base
-; gdt_base: 
-;     dd 0, 0; NULL descriptor
-; gdt_code:
-;     dw memory_limit & 0xffff; segment limit 0 - 15
-;     dw memory_base & 0xffff; base address 0 - 16
-;     db (memory_base >> 16) & 0xffff; base address 0 - 16
-;     db 0b_1_00_1_1_0_1_0; exist dlp  code readable not visited by CPU
-;     db 0b1_1_0_0_0000 | (memory_limit >> 16) & 0xf;
-;     db (memory_base >> 24) & 0xff; base address 24 - 31
+ jmp dword code_selector:0x10000
+ 
+ ud2; indicate error
 
-; gdt_data:
-;     dw memory_limit & 0xffff; segment limit 0 - 15
-;     dw memory_base & 0xffff; base address 0 - 16
-;     db (memory_base >> 16) & 0xffff; base address 0 - 16
-;     db 0b_1_00_1_0_0_1_0; exist dlp  data writable not visited by CPU
-;     db 0b1_1_0_0_0000 | (memory_limit >> 16) & 0xf;
-;     db (memory_base >> 24) & 0xff; base address 24 - 31
+read_disk:
+    ;set the r/w sector number
+    mov dx, 0x1f2
+    mov al, bl
+    out dx, al
 
-; gdt_end:
+    inc dx; 0x1f3
+    mov al, cl; first 8 digit of start sector
+    out dx, al
+
+    inc dx; 0x1f4
+    shr ecx, 8
+    mov al, cl; middle 8 digit of start sector
+    out dx, al
+
+    inc dx; 0x1f5
+    shr ecx, 8
+    mov al, cl; high 8 digit of start sector
+    out dx, al
+
+    inc dx; 0x1f6
+    shr ecx, 8
+    and cl, 0b1111;set the high 4 digits to 0
+
+    mov al, 0b1110_0000
+    or al, cl
+    out dx, al; master disk - LBA
+
+    inc dx; 0f1f7
+    mov al, 0x20; read disk
+    out dx, al
+
+    xor ecx, ecx; clear ecx
+    mov cl, bl; get the number of read/write sectors
+
+    .read:
+        push cx; save cx
+        call .wait; wait until the data is ready
+        call .reads; read a sector
+        pop cx; recover cx
+        loop .read
+
+    ret
+    
+    .wait:
+        mov dx, 0x1f7
+        .check:
+            in al, dx
+            jmp $ + 2; nop
+            jmp $ + 2; nop
+            jmp $ + 2; nop
+            and al, 0b1000_1000
+            cmp al, 0b0000_1000
+            jnz .check
+        ret
+    
+    .reads:
+        mov dx, 0x1f0
+        mov cx, 256; 1 sector has 256 bytes
+        .readw:
+            in ax, dx
+            jmp $ + 2; nop
+            jmp $ + 2; nop
+            jmp $ + 2; nop
+            mov [edi], ax
+            add edi, 2
+            loop .readw
+        ret
+            
+code_selector equ (1 << 3)
+data_selector equ (2 << 3)
+memory_base equ 0; memory start position/base address
+memory_limit equ ((1024 * 1024 * 1024 * 4) / (1024 * 4)) - 1; memory limit (4g / 4k - 1)
+
+gdt_ptr:
+    dw (gdt_end - gdt_base) - 1
+    dd gdt_base
+gdt_base: 
+    dd 0, 0; NULL descriptor
+gdt_code:
+    dw memory_limit & 0xffff; segment limit 0 - 15
+    dw memory_base & 0xffff; base address 0 - 15
+    db (memory_base >> 16) & 0xffff; base address 15 - 23
+    db 0b_1_00_1_1_0_1_0; exist dlp  code readable not visited by CPU
+    db 0b1_1_0_0_0000 | (memory_limit >> 16) & 0xf;
+    db (memory_base >> 24) & 0xff; base address 24 - 31
+
+gdt_data:
+    dw memory_limit & 0xffff; segment limit 0 - 15
+    dw memory_base & 0xffff; base address 0 - 16
+    db (memory_base >> 16) & 0xffff; base address 0 - 16
+    db 0b_1_00_1_0_0_1_0; exist dlp  data writable not visited by CPU
+    db 0b1_1_0_0_0000 | (memory_limit >> 16) & 0xf;
+    db (memory_base >> 24) & 0xff; base address 24 - 31
+
+gdt_end:
 ards_count: 
     dw 0
 ards_buffer:

@@ -15,7 +15,6 @@ mov sp, 0x7c00
 mov si, booting
 call print
 
-xchg bx, bx
 mov edi, 0x1000; read target memory
 mov ecx, 2; start sector
 mov bl, 4; sector number

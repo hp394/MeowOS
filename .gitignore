@@ -2,3 +2,8 @@
 *.ini
 *.img
 *.img.lock
+*.zst
+*.gz
+
+bochs/src
+bochs/pkg
